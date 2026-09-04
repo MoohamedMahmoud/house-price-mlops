@@ -26,16 +26,27 @@ from __future__ import annotations
 
 import pandas as pd
 
-
 # ---------------------------------------------------------------------------
 # Column groups, taken directly from data_description.txt / column_reference.md
 # ---------------------------------------------------------------------------
 
 # Columns where NA is a documented category ("no such feature"), not real missingness.
 STRUCTURAL_NONE_COLS = [
-    "Alley", "MasVnrType", "BsmtQual", "BsmtCond", "BsmtExposure",
-    "BsmtFinType1", "BsmtFinType2", "FireplaceQu", "GarageType",
-    "GarageFinish", "GarageQual", "GarageCond", "PoolQC", "Fence", "MiscFeature",
+    "Alley",
+    "MasVnrType",
+    "BsmtQual",
+    "BsmtCond",
+    "BsmtExposure",
+    "BsmtFinType1",
+    "BsmtFinType2",
+    "FireplaceQu",
+    "GarageType",
+    "GarageFinish",
+    "GarageQual",
+    "GarageCond",
+    "PoolQC",
+    "Fence",
+    "MiscFeature",
 ]
 
 # Column clusters describing one physical feature -- used to detect rows where
@@ -98,9 +109,9 @@ def audit_structural_missingness(
             continue
         mismatch = df.loc[df[cat_col].isna() & df[num_col].fillna(0).ne(0)]
         if len(mismatch):
-            exceptions[f"paired inconsistency: {cat_col} / {num_col}"] = (
-                mismatch[[cat_col, num_col]]
-            )
+            exceptions[f"paired inconsistency: {cat_col} / {num_col}"] = mismatch[
+                [cat_col, num_col]
+            ]
 
     return exceptions
 
@@ -124,11 +135,13 @@ class AmesCleaner:
 
     # ------------------------------------------------------------------ fit
 
-    def fit(self, df: pd.DataFrame) -> "AmesCleaner":
+    def fit(self, df: pd.DataFrame) -> AmesCleaner:
         """Learn every fill statistic from TRAIN data only."""
         df = df.copy()
 
-        self.lotfrontage_by_neighborhood = df.groupby("Neighborhood")["LotFrontage"].median()
+        self.lotfrontage_by_neighborhood = df.groupby("Neighborhood")[
+            "LotFrontage"
+        ].median()
         self.lotfrontage_global_median = df["LotFrontage"].median()
         self.electrical_mode = df["Electrical"].mode()[0]
         self.masvnr_type_mode = df.loc[
@@ -160,9 +173,13 @@ class AmesCleaner:
         df = df.copy()
 
         # --- Step 0: fix the two verified exceptions BEFORE any blanket fill ---
-        masvnr_mode = self.masvnr_type_mode if not is_fit else df.loc[
-            df["MasVnrType"].notna() & (df["MasVnrType"] != "None"), "MasVnrType"
-        ].mode()[0]
+        masvnr_mode = (
+            self.masvnr_type_mode
+            if not is_fit
+            else df.loc[
+                df["MasVnrType"].notna() & (df["MasVnrType"] != "None"), "MasVnrType"
+            ].mode()[0]
+        )
         masvnr_mismatch = df.index[
             df["MasVnrType"].isna() & df["MasVnrArea"].fillna(0).ne(0)
         ]
@@ -186,7 +203,9 @@ class AmesCleaner:
         # --- Step 1: structural "feature absent" fills ---
         df[STRUCTURAL_NONE_COLS] = df[STRUCTURAL_NONE_COLS].fillna("None")
 
-        electrical_fill = self.electrical_mode if not is_fit else df["Electrical"].mode()[0]
+        electrical_fill = (
+            self.electrical_mode if not is_fit else df["Electrical"].mode()[0]
+        )
         df["Electrical"] = df["Electrical"].fillna(electrical_fill)
 
         df["MasVnrArea"] = df["MasVnrArea"].fillna(0)
