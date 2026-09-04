@@ -100,9 +100,7 @@ def test_predict(monkeypatch, tmp_path):
     body = response.json()
 
     assert body["prediction"] == pytest.approx(250000.0)
-    assert body["prediction_log"] == pytest.approx(
-        np.log1p(250000.0)
-    )
+    assert body["prediction_log"] == pytest.approx(np.log1p(250000.0))
 
 
 @pytest.mark.parametrize(
