@@ -44,9 +44,25 @@ class PredictRequest(BaseModel):
     )
 
 
+class BatchPredictRequest(BaseModel):
+    """Raw Ames features for multiple predictions."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    instances: list[PredictRequest] = Field(
+        ...,
+        min_length=1,
+        description="One or more prediction requests.",
+    )
+
+
 class PredictResponse(BaseModel):
     prediction: float
     prediction_log: float
+
+
+class BatchPredictResponse(BaseModel):
+    predictions: list[PredictResponse]
 
 
 _model: Any | None = None
@@ -117,9 +133,28 @@ def health() -> dict[str, Any]:
     }
 
 
-@app.post("/predict", response_model=PredictResponse)
-def predict(request: PredictRequest) -> PredictResponse:
-    """Predict house price from raw Ames features."""
+@app.get("/metadata")
+def metadata() -> dict[str, Any]:
+    """Return metadata about the loaded model artifact."""
+    if _model is None or _cleaner is None or _engineer is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Model artifact is not loaded",
+        )
+
+    return {
+        "model_loaded": True,
+        "model_type": type(_model).__name__,
+        "feature_count": len(_feature_columns),
+        "required_input_count": len(_required_input_columns),
+        "feature_columns": _feature_columns,
+        "required_input_columns": _required_input_columns,
+        "model_path": str(MODEL_PATH),
+    }
+
+
+def predict_one(request: PredictRequest) -> PredictResponse:
+    """Run preprocessing and prediction for one request."""
     if _model is None or _cleaner is None or _engineer is None:
         raise HTTPException(
             status_code=503,
@@ -127,19 +162,6 @@ def predict(request: PredictRequest) -> PredictResponse:
         )
 
     try:
-        # Build a complete raw input row.
-        #
-        # A field may be:
-        #   - explicitly null
-        #   - "NA"
-        #   - "N/A"
-        #   - ""
-        #   - completely omitted
-        #
-        # All of these become None.
-        #
-        # The API does NOT decide how to impute the value.
-        # AmesCleaner remains responsible for preprocessing.
         raw_features = {
             column: normalize_missing_value(request.features.get(column))
             for column in _required_input_columns
@@ -173,3 +195,19 @@ def predict(request: PredictRequest) -> PredictResponse:
             status_code=422,
             detail=str(exc),
         ) from exc
+
+
+@app.post("/predict", response_model=PredictResponse)
+def predict(request: PredictRequest) -> PredictResponse:
+    """Predict house price from raw Ames features."""
+    return predict_one(request)
+
+
+@app.post("/predict/batch", response_model=BatchPredictResponse)
+def predict_batch(
+    request: BatchPredictRequest,
+) -> BatchPredictResponse:
+    """Predict house prices for multiple Ames house records."""
+    predictions = [predict_one(instance) for instance in request.instances]
+
+    return BatchPredictResponse(predictions=predictions)
