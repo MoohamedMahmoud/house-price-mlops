@@ -1,0 +1,47 @@
+#########################################
+# To all folders and files in the project
+#########################################
+# repos:
+#   - repo: https://github.com/astral-sh/ruff-pre-commit
+#     rev: v0.13.0
+#     hooks:
+#       - id: ruff-check
+#         args: [--fix]
+
+#       - id: ruff-format
+
+#   - repo: https://github.com/psf/black-pre-commit-mirror
+#     rev: 26.1.0
+#     hooks:
+#       - id: black
+
+#   - repo: https://github.com/pre-commit/pre-commit-hooks
+#     rev: v6.0.0
+#     hooks:
+#       - id: end-of-file-fixer
+
+#########################################
+# Just to specified folders (src, tests)
+#########################################
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.13.0
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+        files: ^(src|tests)/.*\.py$
+
+      - id: ruff-format
+        files: ^(src|tests)/.*\.py$
+
+  - repo: https://github.com/psf/black-pre-commit-mirror
+    rev: 26.1.0
+    hooks:
+      - id: black
+        files: ^(src|tests)/.*\.py$
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: end-of-file-fixer
