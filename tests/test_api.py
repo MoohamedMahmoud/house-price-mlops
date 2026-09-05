@@ -42,7 +42,10 @@ def create_artifact(path, cleaner):
             "cleaner": cleaner,
             "engineer": FakeEngineer(),
             "feature_columns": ["feature_a", "feature_b"],
-            "required_input_columns": ["feature_a", "feature_b"],
+            "required_input_columns": [
+                "feature_a",
+                "feature_b",
+            ],
         },
         path,
     )
@@ -342,3 +345,66 @@ def test_predict_batch(monkeypatch, tmp_path):
     for prediction in body["predictions"]:
         assert prediction["prediction"] == pytest.approx(250000.0)
         assert prediction["prediction_log"] == pytest.approx(np.log1p(250000.0))
+
+
+def test_correlation_id_is_returned(
+    monkeypatch,
+    tmp_path,
+):
+    """Provided correlation ID should be returned in the response."""
+    artifact_path = tmp_path / "artifact.joblib"
+
+    create_artifact(
+        artifact_path,
+        FakeCleaner(),
+    )
+
+    monkeypatch.setenv(
+        "MODEL_PATH",
+        str(artifact_path),
+    )
+
+    from house_price_mlops import api
+
+    importlib.reload(api)
+
+    correlation_id = "test-correlation-id"
+
+    with TestClient(api.app) as client:
+        response = client.get(
+            "/health",
+            headers={
+                "X-Correlation-ID": correlation_id,
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.headers["X-Correlation-ID"] == correlation_id
+
+
+def test_correlation_id_is_generated(
+    monkeypatch,
+    tmp_path,
+):
+    """API should generate a correlation ID when none is provided."""
+    artifact_path = tmp_path / "artifact.joblib"
+
+    create_artifact(
+        artifact_path,
+        FakeCleaner(),
+    )
+
+    monkeypatch.setenv(
+        "MODEL_PATH",
+        str(artifact_path),
+    )
+
+    from house_price_mlops import api
+
+    importlib.reload(api)
+
+    with TestClient(api.app) as client:
+        response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.headers["X-Correlation-ID"]

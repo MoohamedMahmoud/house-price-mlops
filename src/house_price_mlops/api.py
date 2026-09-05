@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
+import uuid
+from contextvars import ContextVar
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 
 import joblib
 import numpy as np
 import pandas as pd
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from house_price_mlops.features import AmesFeatureEngineer
@@ -20,12 +24,51 @@ MODEL_PATH = Path(os.getenv("MODEL_PATH", "models/lasso_model.joblib"))
 
 MISSING_VALUE_TOKENS = {"", "NA", "N/A", "NULL"}
 
+CORRELATION_ID_HEADER = "X-Correlation-ID"
+
+correlation_id_context: ContextVar[str] = ContextVar(
+    "correlation_id",
+    default="-",
+)
+
+
+class JsonFormatter(logging.Formatter):
+    """Format log records as structured JSON."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        payload = {
+            "timestamp": self.formatTime(
+                record,
+                "%Y-%m-%dT%H:%M:%S",
+            ),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+            "correlation_id": correlation_id_context.get(),
+        }
+
+        return json.dumps(payload)
+
+
+def configure_logging() -> None:
+    """Configure application logging as structured JSON."""
+    root_logger = logging.getLogger()
+
+    if not root_logger.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(JsonFormatter())
+        root_logger.addHandler(handler)
+
+    root_logger.setLevel(logging.INFO)
+
 
 app = FastAPI(
     title="Ames House Price API",
     version="1.0.0",
     description="Predict SalePrice for the Ames House Prices dataset.",
 )
+
+configure_logging()
 
 
 class PredictRequest(BaseModel):
@@ -123,6 +166,47 @@ def startup_event() -> None:
     load_artifact()
 
 
+@app.middleware("http")
+async def correlation_id_middleware(
+    request: Request,
+    call_next,
+):
+    """Attach a correlation ID to each request and response."""
+    correlation_id = request.headers.get(CORRELATION_ID_HEADER)
+
+    if not correlation_id:
+        correlation_id = str(uuid.uuid4())
+
+    token = correlation_id_context.set(correlation_id)
+    start = perf_counter()
+
+    try:
+        LOGGER.info(
+            "Request started: method=%s path=%s",
+            request.method,
+            request.url.path,
+        )
+
+        response = await call_next(request)
+
+        duration_ms = (perf_counter() - start) * 1000
+
+        LOGGER.info(
+            "Request completed: method=%s path=%s status=%d duration_ms=%.2f",
+            request.method,
+            request.url.path,
+            response.status_code,
+            duration_ms,
+        )
+
+        response.headers[CORRELATION_ID_HEADER] = correlation_id
+
+        return response
+
+    finally:
+        correlation_id_context.reset(token)
+
+
 @app.get("/health")
 def health() -> dict[str, Any]:
     """Return API and model health information."""
@@ -203,7 +287,10 @@ def predict(request: PredictRequest) -> PredictResponse:
     return predict_one(request)
 
 
-@app.post("/predict/batch", response_model=BatchPredictResponse)
+@app.post(
+    "/predict/batch",
+    response_model=BatchPredictResponse,
+)
 def predict_batch(
     request: BatchPredictRequest,
 ) -> BatchPredictResponse:
