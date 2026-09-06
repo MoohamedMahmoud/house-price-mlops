@@ -5,8 +5,8 @@ from pathlib import Path
 import joblib
 import pandas as pd
 
-from src.pipeline import build_dataset
-from src.train import build_tuned_model
+from house_price_mlops.pipeline import build_dataset
+from house_price_mlops.train import build_tuned_model
 
 RAW_TRAIN_PATH = Path("data/raw/train.csv")
 MODEL_PATH = Path("models/lasso_model.joblib")
