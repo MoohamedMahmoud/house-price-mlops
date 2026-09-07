@@ -42,7 +42,10 @@ def create_artifact(path, cleaner):
             "cleaner": cleaner,
             "engineer": FakeEngineer(),
             "feature_columns": ["feature_a", "feature_b"],
-            "required_input_columns": ["feature_a", "feature_b"],
+            "required_input_columns": [
+                "feature_a",
+                "feature_b",
+            ],
         },
         path,
     )
@@ -253,3 +256,155 @@ def test_predict_preserves_real_values(
 
     assert response.status_code == 200
     assert api._cleaner.last_input.loc[0, "feature_a"] == "CollgCr"
+
+
+def test_metadata(monkeypatch, tmp_path):
+    """Metadata endpoint should describe the loaded artifact."""
+    artifact_path = tmp_path / "artifact.joblib"
+
+    create_artifact(
+        artifact_path,
+        FakeCleaner(),
+    )
+
+    monkeypatch.setenv(
+        "MODEL_PATH",
+        str(artifact_path),
+    )
+
+    from house_price_mlops import api
+
+    importlib.reload(api)
+
+    with TestClient(api.app) as client:
+        response = client.get("/metadata")
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert body["model_loaded"] is True
+    assert body["model_type"] == "FakeModel"
+    assert body["feature_count"] == 2
+    assert body["required_input_count"] == 2
+    assert body["feature_columns"] == [
+        "feature_a",
+        "feature_b",
+    ]
+    assert body["required_input_columns"] == [
+        "feature_a",
+        "feature_b",
+    ]
+
+
+def test_predict_batch(monkeypatch, tmp_path):
+    """Batch prediction should return one prediction per instance."""
+    artifact_path = tmp_path / "artifact.joblib"
+
+    create_artifact(
+        artifact_path,
+        FakeCleaner(),
+    )
+
+    monkeypatch.setenv(
+        "MODEL_PATH",
+        str(artifact_path),
+    )
+
+    from house_price_mlops import api
+
+    importlib.reload(api)
+
+    with TestClient(api.app) as client:
+        response = client.post(
+            "/predict/batch",
+            json={
+                "instances": [
+                    {
+                        "features": {
+                            "feature_a": 1.0,
+                            "feature_b": 2.0,
+                        }
+                    },
+                    {
+                        "features": {
+                            "feature_a": 3.0,
+                            "feature_b": 4.0,
+                        }
+                    },
+                ]
+            },
+        )
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert len(body["predictions"]) == 2
+
+    for prediction in body["predictions"]:
+        assert prediction["prediction"] == pytest.approx(250000.0)
+        assert prediction["prediction_log"] == pytest.approx(np.log1p(250000.0))
+
+
+def test_correlation_id_is_returned(
+    monkeypatch,
+    tmp_path,
+):
+    """Provided correlation ID should be returned in the response."""
+    artifact_path = tmp_path / "artifact.joblib"
+
+    create_artifact(
+        artifact_path,
+        FakeCleaner(),
+    )
+
+    monkeypatch.setenv(
+        "MODEL_PATH",
+        str(artifact_path),
+    )
+
+    from house_price_mlops import api
+
+    importlib.reload(api)
+
+    correlation_id = "test-correlation-id"
+
+    with TestClient(api.app) as client:
+        response = client.get(
+            "/health",
+            headers={
+                "X-Correlation-ID": correlation_id,
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.headers["X-Correlation-ID"] == correlation_id
+
+
+def test_correlation_id_is_generated(
+    monkeypatch,
+    tmp_path,
+):
+    """API should generate a correlation ID when none is provided."""
+    artifact_path = tmp_path / "artifact.joblib"
+
+    create_artifact(
+        artifact_path,
+        FakeCleaner(),
+    )
+
+    monkeypatch.setenv(
+        "MODEL_PATH",
+        str(artifact_path),
+    )
+
+    from house_price_mlops import api
+
+    importlib.reload(api)
+
+    with TestClient(api.app) as client:
+        response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.headers["X-Correlation-ID"]

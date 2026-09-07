@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
+import uuid
+from contextvars import ContextVar
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 
 import joblib
 import numpy as np
 import pandas as pd
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from house_price_mlops.features import AmesFeatureEngineer
@@ -20,12 +24,51 @@ MODEL_PATH = Path(os.getenv("MODEL_PATH", "models/lasso_model.joblib"))
 
 MISSING_VALUE_TOKENS = {"", "NA", "N/A", "NULL"}
 
+CORRELATION_ID_HEADER = "X-Correlation-ID"
+
+correlation_id_context: ContextVar[str] = ContextVar(
+    "correlation_id",
+    default="-",
+)
+
+
+class JsonFormatter(logging.Formatter):
+    """Format log records as structured JSON."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        payload = {
+            "timestamp": self.formatTime(
+                record,
+                "%Y-%m-%dT%H:%M:%S",
+            ),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+            "correlation_id": correlation_id_context.get(),
+        }
+
+        return json.dumps(payload)
+
+
+def configure_logging() -> None:
+    """Configure application logging as structured JSON."""
+    root_logger = logging.getLogger()
+
+    if not root_logger.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(JsonFormatter())
+        root_logger.addHandler(handler)
+
+    root_logger.setLevel(logging.INFO)
+
 
 app = FastAPI(
     title="Ames House Price API",
     version="1.0.0",
     description="Predict SalePrice for the Ames House Prices dataset.",
 )
+
+configure_logging()
 
 
 class PredictRequest(BaseModel):
@@ -44,9 +87,25 @@ class PredictRequest(BaseModel):
     )
 
 
+class BatchPredictRequest(BaseModel):
+    """Raw Ames features for multiple predictions."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    instances: list[PredictRequest] = Field(
+        ...,
+        min_length=1,
+        description="One or more prediction requests.",
+    )
+
+
 class PredictResponse(BaseModel):
     prediction: float
     prediction_log: float
+
+
+class BatchPredictResponse(BaseModel):
+    predictions: list[PredictResponse]
 
 
 _model: Any | None = None
@@ -107,6 +166,47 @@ def startup_event() -> None:
     load_artifact()
 
 
+@app.middleware("http")
+async def correlation_id_middleware(
+    request: Request,
+    call_next,
+):
+    """Attach a correlation ID to each request and response."""
+    correlation_id = request.headers.get(CORRELATION_ID_HEADER)
+
+    if not correlation_id:
+        correlation_id = str(uuid.uuid4())
+
+    token = correlation_id_context.set(correlation_id)
+    start = perf_counter()
+
+    try:
+        LOGGER.info(
+            "Request started: method=%s path=%s",
+            request.method,
+            request.url.path,
+        )
+
+        response = await call_next(request)
+
+        duration_ms = (perf_counter() - start) * 1000
+
+        LOGGER.info(
+            "Request completed: method=%s path=%s status=%d duration_ms=%.2f",
+            request.method,
+            request.url.path,
+            response.status_code,
+            duration_ms,
+        )
+
+        response.headers[CORRELATION_ID_HEADER] = correlation_id
+
+        return response
+
+    finally:
+        correlation_id_context.reset(token)
+
+
 @app.get("/health")
 def health() -> dict[str, Any]:
     """Return API and model health information."""
@@ -117,9 +217,28 @@ def health() -> dict[str, Any]:
     }
 
 
-@app.post("/predict", response_model=PredictResponse)
-def predict(request: PredictRequest) -> PredictResponse:
-    """Predict house price from raw Ames features."""
+@app.get("/metadata")
+def metadata() -> dict[str, Any]:
+    """Return metadata about the loaded model artifact."""
+    if _model is None or _cleaner is None or _engineer is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Model artifact is not loaded",
+        )
+
+    return {
+        "model_loaded": True,
+        "model_type": type(_model).__name__,
+        "feature_count": len(_feature_columns),
+        "required_input_count": len(_required_input_columns),
+        "feature_columns": _feature_columns,
+        "required_input_columns": _required_input_columns,
+        "model_path": str(MODEL_PATH),
+    }
+
+
+def predict_one(request: PredictRequest) -> PredictResponse:
+    """Run preprocessing and prediction for one request."""
     if _model is None or _cleaner is None or _engineer is None:
         raise HTTPException(
             status_code=503,
@@ -127,19 +246,6 @@ def predict(request: PredictRequest) -> PredictResponse:
         )
 
     try:
-        # Build a complete raw input row.
-        #
-        # A field may be:
-        #   - explicitly null
-        #   - "NA"
-        #   - "N/A"
-        #   - ""
-        #   - completely omitted
-        #
-        # All of these become None.
-        #
-        # The API does NOT decide how to impute the value.
-        # AmesCleaner remains responsible for preprocessing.
         raw_features = {
             column: normalize_missing_value(request.features.get(column))
             for column in _required_input_columns
@@ -173,3 +279,22 @@ def predict(request: PredictRequest) -> PredictResponse:
             status_code=422,
             detail=str(exc),
         ) from exc
+
+
+@app.post("/predict", response_model=PredictResponse)
+def predict(request: PredictRequest) -> PredictResponse:
+    """Predict house price from raw Ames features."""
+    return predict_one(request)
+
+
+@app.post(
+    "/predict/batch",
+    response_model=BatchPredictResponse,
+)
+def predict_batch(
+    request: BatchPredictRequest,
+) -> BatchPredictResponse:
+    """Predict house prices for multiple Ames house records."""
+    predictions = [predict_one(instance) for instance in request.instances]
+
+    return BatchPredictResponse(predictions=predictions)
