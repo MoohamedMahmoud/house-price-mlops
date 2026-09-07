@@ -7,8 +7,8 @@ Status marked per item. Use this as the template for any future project.
 - [x] Folder structure: `src/`, `tests/`, `notebooks/`, `configs/`, `data/`, `models/`
 - [x] `.gitignore` (data/, .venv/, secrets)
 - [x] Dependencies declared + `uv.lock` committed
-- [ ] `README.md` (still empty)
-- [ ] Delete leftover `src/house_price_mlops/` scaffold folder
+- [x] `README.md` (still empty)
+- [x] Delete leftover `src/house_price_mlops/` scaffold folder
 
 ## Phase 2 — Data Understanding
 - [x] EDA (distributions, correlations, categorical relationships)
@@ -35,27 +35,25 @@ Status marked per item. Use this as the template for any future project.
 - [x] 10-model baseline comparison
 - [x] Cross-validation (mean + std, not single split)
 - [x] Hyperparameter tuning on top 3 candidates
-- [ ] **Final model decision confirmed** (Lasso vs. Gradient Boosting — currently a near-tie)
+- [x] **Final model decision confirmed** (Lasso vs. Gradient Boosting — currently a near-tie)
 
-## Phase 6 — Serving (not started)
-- [ ] Persist trained model to `models/` (`joblib`)
-- [ ] `src/api.py` — FastAPI `/predict` + `/health`, Pydantic input validation
-- [ ] Structured logging (`structlog`)
-- [ ] API-level tests (`TestClient`)
+## Phase 6 — Serving 
+- [x] Persist trained model to `models/` (`joblib`)
+- [x] `src/api.py` — FastAPI `/predict` + `/health`, Pydantic input validation
+- [x] Structured logging (`structlog`)
+- [x] API-level tests (`TestClient`)
 
-## Phase 7 — Containerization (not started)
-- [ ] `Dockerfile` (multi-stage, non-root)
-- [ ] `.dockerignore`
-- [ ] `docker-compose.yml`
+## Phase 7 — Containerization 
+- [x] `Dockerfile` (multi-stage, non-root)
+- [x] `.dockerignore`
+- [x] `docker-compose.yml`
 
-## Phase 8 — CI/CD (not started)
-- [ ] `.github/workflows/ci.yml` — lint → test → build
+## Phase 8 — CI/CD 
+- [x] `.github/workflows/ci.yml` — lint → test → build
 - [ ] Coverage threshold gate
 
-## Phase 9 — Polish (not started)
-- [ ] `README.md` — setup, usage, architecture
-- [ ] `configs/` populated (thresholds, paths — no magic numbers)
+## Phase 9 — Polish 
+- [x] `README.md` — setup, usage, architecture
+- [x] `configs/` populated (thresholds, paths — no magic numbers)
 
 ---
-
-**You are here:** end of Phase 5. Next unblocking action: confirm final model → Phase 6.
